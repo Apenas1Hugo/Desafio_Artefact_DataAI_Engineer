@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 import unicodedata
+import textwrap
 
 from pypdf import PdfReader
 
@@ -17,30 +18,45 @@ def load_policies() -> list[str]:
         )
 
     reader = PdfReader(POLICY_FILE)
+    chunks = []
 
-    text = "\n".join(
-        page.extract_text() or ""
-        for page in reader.pages
-    )
+    for page in reader.pages:
+        text = page.extract_text() or ""
 
-    if not text.strip():
+        if not text.strip():
+            continue
+
+        # Normaliza os espaços e as quebras de linha extraídas do PDF
+        text = re.sub(r"\s+", " ", text).strip()
+
+        # Identifica as seções numeradas do documento
+        sections = re.split(
+            r"(?=\b\d+(?:\.\d+)*\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ])",
+            text
+        )
+
+        for section in sections:
+            section = section.strip()
+
+            if not section:
+                continue
+
+            # Divide somente se a seção ultrapassar o limite
+            if len(section) > 1800:
+                parts = textwrap.wrap(
+                    section,
+                    width=1800,
+                    break_long_words=False,
+                    break_on_hyphens=False
+                )
+                chunks.extend(parts)
+            else:
+                chunks.append(section)
+
+    if not chunks:
         raise ValueError("Não foi possível extrair texto do PDF.")
 
-    
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\s*\n\s*", " ", text)
-
-    
-    chunks = re.split(
-        r"(?<=[.!?])\s+",
-        text
-    )
-
-    return [
-        chunk.strip()
-        for chunk in chunks
-        if len(chunk.strip()) > 40
-    ]
+    return chunks
 
 
 def normalize_text(text: str) -> str:
@@ -52,8 +68,7 @@ def normalize_text(text: str) -> str:
     )
 
 
-def search_policies(query: str, limit: int = 3) -> list[dict]:
-
+def search_policies(query: str, limit: int = 8) -> list[dict]:
     if not query.strip():
         return []
 
@@ -77,7 +92,6 @@ def search_policies(query: str, limit: int = 3) -> list[dict]:
 
     for paragraph in paragraphs:
         normalized_paragraph = normalize_text(paragraph)
-
         paragraph_words = set(normalized_paragraph.split())
 
         matching_words = query_words.intersection(paragraph_words)
@@ -85,17 +99,14 @@ def search_policies(query: str, limit: int = 3) -> list[dict]:
         if matching_words:
             score = len(matching_words)
 
-          
-            for word in query_words:
-                if word in paragraph_words:
-                    score += 1
+            if query_words.issubset(paragraph_words):
+                score += 3
 
             results.append({
                 "text": paragraph,
                 "relevance": score
             })
 
-   
     results.sort(
         key=lambda item: item["relevance"],
         reverse=True

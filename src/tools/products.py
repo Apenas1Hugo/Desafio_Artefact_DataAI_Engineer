@@ -12,13 +12,11 @@ def search_products(
     products = data["products"]
     categories = data["categories"]
 
-    
     available_products = products[
         (products["status"] == "active") &
         (products["stock_quantity"] > 0)
     ].copy()
 
-    
     available_products = available_products.merge(
         categories[["category_id", "name"]],
         on="category_id",
@@ -26,28 +24,40 @@ def search_products(
         suffixes=("", "_category")
     )
 
-   
-    search_term = query.strip().casefold()
+    # Remove palavras que não ajudam na identificação do produto
+    stopwords = {
+        "quais", "qual", "sao", "estao", "disponiveis",
+        "tem", "temos", "de", "da", "do", "com",
+        "os", "as", "um", "uma", "para"
+    }
 
-    if search_term:
-        mask = (
-            available_products["name"].str.casefold().str.contains(
-                search_term, na=False
-            ) |
-            available_products["description"].str.casefold().str.contains(
-                search_term, na=False
-            ) |
-            available_products["name_category"].str.casefold().str.contains(
-                search_term, na=False
-            )
+    # Separa a consulta em palavras
+    query_words = [
+        word for word in query.casefold().split()
+        if word not in stopwords and len(word) > 2
+    ]
+
+    # Combina as informações utilizadas na pesquisa
+    search_text = (
+        available_products["name"].fillna("") + " " +
+        available_products["description"].fillna("") + " " +
+        available_products["name_category"].fillna("")
+    ).str.casefold()
+
+    # Exige que todas as palavras relevantes sejam encontradas
+    mask = pd.Series(True, index=available_products.index)
+
+    for word in query_words:
+        mask &= search_text.str.contains(
+            word,
+            regex=False,
+            na=False
         )
 
-        available_products = available_products[mask]
+    available_products = available_products[mask]
 
-  
     available_products = available_products.head(limit)
 
-    
     return available_products[
         [
             "product_id",
@@ -60,7 +70,6 @@ def search_products(
     ].rename(
         columns={"name_category": "category"}
     ).to_dict(orient="records")
-
 def get_product_price(
     data: dict[str, pd.DataFrame],
     product_id: int,
